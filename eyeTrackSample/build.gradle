@@ -21,5 +21,8 @@ android {
 }
 
 dependencies {
+    compile fileTree(include: ['*.jar'], dir: 'libs')
     compile project(':openCVLibrary300')
+    //compile project(':dlib')
+    implementation project(':dlib')
 }

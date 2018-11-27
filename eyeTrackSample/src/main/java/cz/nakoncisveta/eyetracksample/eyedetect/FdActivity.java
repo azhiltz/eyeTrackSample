@@ -10,6 +10,7 @@ import android.view.View;
 import android.view.WindowManager;
 import android.widget.SeekBar;
 import android.widget.TextView;
+import android.graphics.Matrix;
 
 import org.opencv.android.BaseLoaderCallback;
 import org.opencv.android.CameraBridgeViewBase;
@@ -28,12 +29,22 @@ import org.opencv.core.Size;
 import org.opencv.imgproc.Imgproc;
 import org.opencv.objdetect.CascadeClassifier;
 import org.opencv.objdetect.Objdetect;
+import org.opencv.android.Utils;
+import org.opencv.core.CvException;
 
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 
+import com.tzutalin.dlib.FaceDet;
+import com.tzutalin.dlib.VisionDetRet;
+import java.util.List;
+import java.util.Queue;
+import java.util.LinkedList;
+import android.graphics.Bitmap;
+import android.util.Base64;
+import java.io.ByteArrayOutputStream;
 
 public class FdActivity extends Activity implements CvCameraViewListener2 {
 
@@ -83,6 +94,39 @@ public class FdActivity extends Activity implements CvCameraViewListener2 {
 
     double xCenter = -1;
     double yCenter = -1;
+
+    //DLIB detector
+    private FaceDet mFaceDet;
+    private int mframeNum = 0;
+    private static final int INPUT_SIZE   = 976;
+    private static final int INPUT_WIDTH  = INPUT_SIZE;
+    private static final int INPUT_HEIGHT = INPUT_SIZE;
+    private List<VisionDetRet> results;
+
+    public class FaceInfo {
+
+        public FaceInfo(Bitmap image, Rect r)
+        {
+            mFaceImage = image;
+            mFaceRect = r;
+            mEncoding = encodeImage(image);
+        }
+        public Bitmap mFaceImage;
+        public Rect mFaceRect;
+        public String mEncoding;
+        public String encodeImage(Bitmap b)
+        {
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            b.compress(Bitmap.CompressFormat.JPEG, 90, out);
+            byte[] bb = out.toByteArray();
+            String imageEncoded = Base64.encodeToString(bb,Base64.DEFAULT);
+
+            return imageEncoded;
+        }
+    }
+
+    private Queue<FaceInfo> mDetectedFaces;   // 检测到待识别的人脸队列
+
 
     private BaseLoaderCallback  mLoaderCallback = new BaseLoaderCallback(this) {
         @Override
@@ -220,6 +264,10 @@ public class FdActivity extends Activity implements CvCameraViewListener2 {
 
             }
         });
+
+        //DLIB Init
+        mFaceDet = new FaceDet(); // Jia 2018-11-17 remove parameter Constants.getFaceShapeModelPath());
+        mDetectedFaces = new LinkedList<>();
     }
 
     @Override
@@ -245,6 +293,12 @@ public class FdActivity extends Activity implements CvCameraViewListener2 {
 
     public void onDestroy() {
         super.onDestroy();
+        synchronized ( FdActivity.this ) {
+            if ( mFaceDet != null )
+            {
+                mFaceDet.release();
+            }
+        }
         mOpenCvCameraView.disableView();
     }
 
@@ -258,6 +312,13 @@ public class FdActivity extends Activity implements CvCameraViewListener2 {
         mRgba.release();
         mZoomWindow.release();
         mZoomWindow2.release();
+    }
+
+    public Bitmap imageSideInversion(Bitmap src){
+        Matrix sideInversion = new Matrix();
+        sideInversion.setScale(-1, 1);
+        Bitmap inversedImage = Bitmap.createBitmap(src, 0, 0, src.getWidth(), src.getHeight(), sideInversion, false);
+        return inversedImage;
     }
 
     public Mat onCameraFrame(CvCameraViewFrame inputFrame) {
@@ -276,8 +337,20 @@ public class FdActivity extends Activity implements CvCameraViewListener2 {
         if (mZoomWindow == null || mZoomWindow2 == null)
             CreateAuxiliaryMats();
 
-        MatOfRect faces = new MatOfRect();
+        //MatOfRect faces = new MatOfRect();
 
+
+        Bitmap bmp = null;
+        Bitmap tmp = Bitmap.createBitmap(mRgba.cols(), mRgba.rows(), Bitmap.Config.ARGB_8888);;
+        try {
+            //Imgproc.cvtColor( mRgba, tmp, Imgproc.COLOR_GRAY2RGBA, 4);
+            bmp = Bitmap.createBitmap(mRgba.cols(), mRgba.rows(), Bitmap.Config.ARGB_8888);
+            Utils.matToBitmap(mRgba, bmp );
+            //bmp = imageSideInversion(tmp);
+        }
+        catch (CvException e){Log.d("Convert Exception",e.getMessage());}
+
+        /*
         if (mDetectorType == JAVA_DETECTOR) {
             if (mJavaDetector != null)
                 mJavaDetector.detectMultiScale(mGray, faces, 1.1, 2, 2, // TODO: objdetect.CV_HAAR_SCALE_IMAGE
@@ -286,7 +359,44 @@ public class FdActivity extends Activity implements CvCameraViewListener2 {
         else {
             Log.e(TAG, "Detection method is not selected!");
         }
+        */
 
+        //Do Detect
+        mframeNum++;
+
+        if ( mframeNum %3 == 0 && mDetectedFaces.size() < 3 )
+        {
+            float mResizeRatio = 4.0f;
+            int W = (int) (mRgba.cols() / mResizeRatio);
+            int H = (int) (mRgba.rows() / mResizeRatio);
+            Bitmap mResizedBitmap = Bitmap.createScaledBitmap( bmp, W, H, true);
+            results = mFaceDet.detect(mResizedBitmap);
+            //TODO: push to Q; 2 Crop image for rec
+            Log.d("DetResult", ""+results.size() );
+
+            if( mDetectedFaces.size() < 3 ) // 如果队列太长，则跳过，否则延迟太大, nouse
+            {
+                // TODO: 选择最大的一个人脸输出
+                for (final VisionDetRet ret : results) {
+                    int left = (int) (ret.getLeft() * mResizeRatio);
+                    int top = (int) (ret.getTop() * mResizeRatio);
+                    int right = (int) (ret.getRight() * mResizeRatio);
+                    int bottom = (int) (ret.getBottom() * mResizeRatio);
+
+
+                    Imgproc.rectangle(mRgba, new Point( left, top), new Point( right, bottom ),
+                            FACE_RECT_COLOR, 5 );
+                }
+            }
+
+            return mRgba;
+        }
+        else
+        {
+            return mRgba;
+        }
+
+        /* Old Haar method
         Rect[] facesArray = faces.toArray();
         for (int i = 0; i < facesArray.length; i++)
         {	Imgproc.rectangle(mRgba, facesArray[i].tl(), facesArray[i].br(),
@@ -343,8 +453,10 @@ public class FdActivity extends Activity implements CvCameraViewListener2 {
 
 
         }
-
         return mRgba;
+    */
+
+
     }
 
     @Override
