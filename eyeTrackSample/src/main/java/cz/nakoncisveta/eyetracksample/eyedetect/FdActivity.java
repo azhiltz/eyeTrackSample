@@ -126,7 +126,8 @@ public class FdActivity extends Activity implements CvCameraViewListener2 {
     }
 
     private Queue<FaceInfo> mDetectedFaces;   // 检测到待识别的人脸队列
-
+    private Mat mTemplate;
+    private boolean bIsTemplateReady = false;
 
     private BaseLoaderCallback  mLoaderCallback = new BaseLoaderCallback(this) {
         @Override
@@ -305,11 +306,14 @@ public class FdActivity extends Activity implements CvCameraViewListener2 {
     public void onCameraViewStarted(int width, int height) {
         mGray = new Mat();
         mRgba = new Mat();
+        mTemplate = new Mat();
     }
 
     public void onCameraViewStopped() {
         mGray.release();
         mRgba.release();
+        mTemplate.release();
+
         mZoomWindow.release();
         mZoomWindow2.release();
     }
@@ -374,6 +378,24 @@ public class FdActivity extends Activity implements CvCameraViewListener2 {
             //TODO: push to Q; 2 Crop image for rec
             Log.d("DetResult", ""+results.size() );
 
+            //Get template
+            if ( results.size() > 0 ){
+                VisionDetRet ret = results.get(0);
+                int left = (int) (ret.getLeft() * mResizeRatio);
+                int top = (int) (ret.getTop() * mResizeRatio);
+                int right = (int) (ret.getRight() * mResizeRatio);
+                int bottom = (int) (ret.getBottom() * mResizeRatio);
+
+                Rect r_face = new Rect( left, top, right-left, bottom-top );
+                mTemplate = mGray.submat( r_face );
+                bIsTemplateReady = true;
+
+            }
+            else
+            {
+                bIsTemplateReady = false;
+            }
+
             if( mDetectedFaces.size() < 3 ) // 如果队列太长，则跳过，否则延迟太大, nouse
             {
                 // TODO: 选择最大的一个人脸输出
@@ -393,6 +415,12 @@ public class FdActivity extends Activity implements CvCameraViewListener2 {
         }
         else
         {
+            //Tracking
+            if ( bIsTemplateReady )
+            {
+                Rect rAll = new Rect( 0, 0, mGray.cols(), mGray.rows() );
+                match_eye( rAll, mTemplate, method );
+            }
             return mRgba;
         }
 
@@ -553,7 +581,7 @@ public class FdActivity extends Activity implements CvCameraViewListener2 {
                 matchLoc.y + mTemplate.rows() + area.y);
 
         Imgproc.rectangle(mRgba, matchLoc_tx, matchLoc_ty, new Scalar(255, 255, 0,
-                255));
+                255), 3 );
         Rect rec = new Rect(matchLoc_tx,matchLoc_ty);
 
 
