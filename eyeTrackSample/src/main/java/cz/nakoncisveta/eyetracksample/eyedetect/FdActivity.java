@@ -392,10 +392,25 @@ public class FdActivity extends Activity implements CvCameraViewListener2 {
                 int top = (int) (ret.getTop() * mResizeRatio);
                 int right = (int) (ret.getRight() * mResizeRatio);
                 int bottom = (int) (ret.getBottom() * mResizeRatio);
+                try {
+                    Rect r_face = new Rect(ret.getLeft(), ret.getTop(), ret.getRight() - ret.getLeft(), ret.getBottom() - ret.getTop());
+                    if ( r_face.x < 0 )
+                        r_face.x = 0;
+                    if ( r_face.y < 0 )
+                        r_face.y = 0;
+                    if ( r_face.x + r_face.width >= W )
+                        r_face.width = W - r_face.x;
+                    if ( r_face.y + r_face.height >= H )
+                        r_face.height = H - r_face.y;
 
-                Rect r_face = new Rect( ret.getLeft(), ret.getTop(), ret.getRight()-ret.getLeft(), ret.getBottom()-ret.getTop() );
-                mTemplate = mGraySubScale.submat( r_face );
-                bIsTemplateReady = true;
+                    mTemplate = mGraySubScale.submat(r_face);
+                    bIsTemplateReady = true;
+                }
+                catch ( CvException e )
+                {
+                    bIsTemplateReady = false;
+                    Log.e( TAG, "Get submat wrong: "+e.getMessage() );
+                }
 
             }
             else
