@@ -127,6 +127,8 @@ public class FdActivity extends Activity implements CvCameraViewListener2 {
 
     private Queue<FaceInfo> mDetectedFaces;   // 检测到待识别的人脸队列
     private Mat mTemplate;
+    private Mat mGraySubScale;
+
     private boolean bIsTemplateReady = false;
 
     private BaseLoaderCallback  mLoaderCallback = new BaseLoaderCallback(this) {
@@ -307,12 +309,14 @@ public class FdActivity extends Activity implements CvCameraViewListener2 {
         mGray = new Mat();
         mRgba = new Mat();
         mTemplate = new Mat();
+        mGraySubScale = new Mat();
     }
 
     public void onCameraViewStopped() {
         mGray.release();
         mRgba.release();
         mTemplate.release();
+        mGraySubScale.release();
 
         mZoomWindow.release();
         mZoomWindow2.release();
@@ -367,12 +371,15 @@ public class FdActivity extends Activity implements CvCameraViewListener2 {
 
         //Do Detect
         mframeNum++;
+        float mResizeRatio = 4.0f;
+        int W = (int) (mRgba.cols() / mResizeRatio);
+        int H = (int) (mRgba.rows() / mResizeRatio);
+
+        Imgproc.resize( mGray, mGraySubScale, new Size( W, H ) );
 
         if ( mframeNum %3 == 0 && mDetectedFaces.size() < 3 )
         {
-            float mResizeRatio = 4.0f;
-            int W = (int) (mRgba.cols() / mResizeRatio);
-            int H = (int) (mRgba.rows() / mResizeRatio);
+
             Bitmap mResizedBitmap = Bitmap.createScaledBitmap( bmp, W, H, true);
             results = mFaceDet.detect(mResizedBitmap);
             //TODO: push to Q; 2 Crop image for rec
@@ -386,8 +393,8 @@ public class FdActivity extends Activity implements CvCameraViewListener2 {
                 int right = (int) (ret.getRight() * mResizeRatio);
                 int bottom = (int) (ret.getBottom() * mResizeRatio);
 
-                Rect r_face = new Rect( left, top, right-left, bottom-top );
-                mTemplate = mGray.submat( r_face );
+                Rect r_face = new Rect( ret.getLeft(), ret.getTop(), ret.getRight()-ret.getLeft(), ret.getBottom()-ret.getTop() );
+                mTemplate = mGraySubScale.submat( r_face );
                 bIsTemplateReady = true;
 
             }
@@ -418,8 +425,8 @@ public class FdActivity extends Activity implements CvCameraViewListener2 {
             //Tracking
             if ( bIsTemplateReady )
             {
-                Rect rAll = new Rect( 0, 0, mGray.cols(), mGray.rows() );
-                match_eye( rAll, mTemplate, method );
+                Rect rAll = new Rect( 0, 0, W, H );
+                match_eye( rAll, mTemplate, method, mResizeRatio );
             }
             return mRgba;
         }
@@ -533,9 +540,9 @@ public class FdActivity extends Activity implements CvCameraViewListener2 {
 
     }
 
-    private void match_eye(Rect area, Mat mTemplate, int type) {
+    private void match_eye(Rect area, Mat mTemplate, int type, float fResizeScale ) {
         Point matchLoc;
-        Mat mROI = mGray.submat(area);
+        Mat mROI = mGraySubScale.submat(area);
         int result_cols = mROI.cols() - mTemplate.cols() + 1;
         int result_rows = mROI.rows() - mTemplate.rows() + 1;
         // Check for bad template size
@@ -579,6 +586,11 @@ public class FdActivity extends Activity implements CvCameraViewListener2 {
         Point matchLoc_tx = new Point(matchLoc.x + area.x, matchLoc.y + area.y);
         Point matchLoc_ty = new Point(matchLoc.x + mTemplate.cols() + area.x,
                 matchLoc.y + mTemplate.rows() + area.y);
+         matchLoc_tx.x *= fResizeScale;
+         matchLoc_tx.y *= fResizeScale;
+
+        matchLoc_ty.x *= fResizeScale;
+        matchLoc_ty.y *= fResizeScale;
 
         Imgproc.rectangle(mRgba, matchLoc_tx, matchLoc_ty, new Scalar(255, 255, 0,
                 255), 3 );
